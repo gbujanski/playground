@@ -1,0 +1,7 @@
+.env
+desktop.ini
+.vscode
+.idea
+.DS_store
+node_modules
+.turbo

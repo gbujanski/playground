@@ -1,0 +1,136 @@
+services:
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - app-network
+
+
+  db-messenger:
+    container_name: db-messenger
+    image: postgres:15.2-alpine
+    restart: always
+    environment:
+      POSTGRES_SERVER: ${POSTGRES_SERVER:-localhost}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-messenger}
+    ports:
+      - "5432:${POSTGRES_PORT}"
+    volumes:
+      - db_messenger_volume:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  db-auth:
+    container_name: db-auth
+    image: postgres:15.2-alpine
+    restart: always
+    environment:
+      POSTGRES_SERVER: ${POSTGRES_AUTH_SERVER:-localhost}
+      POSTGRES_USER: ${POSTGRES_AUTH_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_AUTH_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_AUTH_DB:-auth}
+    ports:
+      - "5433:${POSTGRES_AUTH_PORT}"
+    volumes:
+      - db_auth_volume:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  backend-messenger:
+    build:
+      context: ../backend/messenger
+    container_name: backend-messenger
+    environment:
+      POSTGRES_SERVER: ${POSTGRES_SERVER:-db-messenger}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_MESSENGER_DB: ${POSTGRES_MESSENGER_DB:-messenger}
+      SECRET_KEY: ${SECRET_KEY:-your_secret_key}
+    volumes:
+      - ../backend/messenger:/app
+    labels:
+      - "traefik.http.routers.api-messenger.rule=Host(`localhost`) && PathPrefix(`/api/messenger`)"
+      - "traefik.http.services.api-messenger.loadbalancer.server.port=8000"
+      - "traefik.http.routers.api-messenger.middlewares=api-messenger-auth@docker"
+      - "traefik.http.middlewares.api-messenger-auth.forwardauth.address=http://backend-auth:8000/api/auth/users/me"
+      - "traefik.http.middlewares.api-messenger-auth.forwardauth.trustForwardHeader=true"
+      - "traefik.http.middlewares.api-messenger-auth.forwardauth.authResponseHeaders=X-User-ID,X-User-Role"
+    ports:
+      - "8004:8000"
+
+
+    depends_on:
+      - db-messenger
+    networks:
+      - app-network
+
+  backend-auth:
+    build:
+      context: ../backend/auth
+      dockerfile: Dockerfile
+    container_name: backend-auth
+    environment:
+      POSTGRES_SERVER: ${POSTGRES_AUTH_SERVER:-db-auth}
+      POSTGRES_USER: ${POSTGRES_AUTH_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_AUTH_PASSWORD:-password}
+      POSTGRES_PORT: ${POSTGRES_AUTH_PORT:-5433}
+      POSTGRES_DB: ${POSTGRES_AUTH_DB:-auth}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your_secret_key}
+      JWT_ISSUER: "${JWT_ISSUER:-NNPAuthService}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-NNPServices}"
+      JWT_EXPIRY_MINUTES: "${JWT_EXPIRY_MINUTES:-15}"
+    labels:
+      - "traefik.http.routers.api-auth.rule=Host(`localhost`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.services.api-auth.loadbalancer.server.port=8080"
+    ports:
+      - "8003:8080"
+    depends_on:
+      - db-auth
+    networks:
+      - app-network
+
+  front-messenger:
+    build:
+      context: ../front
+      dockerfile: apps/messenger/Dockerfile
+    container_name: front-messenger
+    ports:
+      - "3001:3000"
+    labels:
+      - "traefik.http.routers.messenger.rule=Host(`localhost`) && PathPrefix(`/messenger`)"
+      - "traefik.http.services.messenger.loadbalancer.server.port=3000"
+    networks:
+      - app-network
+
+  front-auth:
+    build:
+      context: ../front
+      dockerfile: apps/auth/Dockerfile
+    container_name: front-auth
+    ports:
+      - "3002:3000"
+    labels:
+      - "traefik.http.routers.auth.rule=Host(`localhost`) && PathPrefix(`/auth`)"
+      - "traefik.http.services.auth.loadbalancer.server.port=3000"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  db_auth_volume:
+  db_messenger_volume:

@@ -1,0 +1,22 @@
+# Foldery builda
+bin/
+obj/
+
+# Systemowe
+.vs/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Systemowe pliki
+Dockerfile
+*.md
+*.log
+
+# Inne (np. dla Blazor/Web z JS/TS)
+node_modules/
+dist/
+.env
+.env.*
